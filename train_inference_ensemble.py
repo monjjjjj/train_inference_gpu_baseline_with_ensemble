@@ -17,11 +17,22 @@ from albumentations.pytorch.transforms import ToTensorV2
 from torch.utils.data import Dataset,DataLoader
 from torch.utils.data.sampler import SequentialSampler, RandomSampler
 import sklearn
+from sklearn import metrics
 
 os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
 os.environ['CUDA_VISIBLE_DEVICES'] = '1'
 
 SEED = 42
+N_SPLITS=5
+HEIGHT, WIDTH = 512
+FOLD_NUMBER = 0
+ONEHOT_LENGTH = 4
+IN_FEATURE = 1408
+OUT_FEATURE = 4
+NUM_EPOCH = 25
+LEARNING_RATE = 0.001
+CHECKPOINT_PATH = '/home/chloe/Chloe'
+DATA_ROOT_PATH = '/home/chloe/Siting/ALASKA2'
 
 def seed_everything(seed):
     random.seed(seed)
@@ -49,39 +60,36 @@ for label, kind in enumerate(['Cover', 'JMiPOD', 'JUNIWARD', 'UERD']):
 
 random.shuffle(dataset)
 dataset = pd.DataFrame(dataset)
-
-gkf = GroupKFold(n_splits=5)
+gkf = GroupKFold(N_SPLITS)
 
 dataset.loc[:, 'fold'] = 0
-for fold_number, (train_index, val_index) in enumerate(gkf.split(X=dataset.index, y=dataset['label'], groups=dataset['image_name'])):
-    dataset.loc[dataset.iloc[val_index].index, 'fold'] = fold_number
+for FOLD_NUMBER, (train_index, val_index) in enumerate(gkf.split(X = dataset.index, y = dataset['label'], groups = dataset['image_name'])):
+    dataset.loc[dataset.iloc[val_index].index, 'fold'] = FOLD_NUMBER
 
 # Simple Augs: Flips
 def get_train_transforms():
     return A.Compose([
-            A.HorizontalFlip(p=0.5),
-            A.VerticalFlip(p=0.5),
-            A.Resize(height=512, width=512, p=1.0),
-            ToTensorV2(p=1.0),
-        ], p=1.0)
+            A.HorizontalFlip(p = 0.5),
+            A.VerticalFlip(p = 0.5),
+            A.Resize(height = HEIGHT, width = WIDTH, p=1.0),
+            ToTensorV2(p = 1.0),
+        ], p = 1.0)
 
 def get_valid_transforms():
     return A.Compose([
-            A.Resize(height=512, width=512, p=1.0),
-            ToTensorV2(p=1.0),
-        ], p=1.0)
+            A.Resize(height = HEIGHT, width = WIDTH, p = 1.0),
+            ToTensorV2(p = 1.0),
+        ], p = 1.0)
 
 # Dataset
-DATA_ROOT_PATH = '/home/chloe/Siting/ALASKA2'
-
 def onehot(size, target):
-    vec = torch.zeros(size, dtype=torch.float32)
+    vec = torch.zeros(size, dtype = torch.float32)
     vec[target] = 1.
     return vec
 
 class DatasetRetriever(Dataset):
 
-    def __init__(self, kinds, image_names, labels, transforms=None):
+    def __init__(self, kinds, image_names, labels, transforms = None):
         super().__init__()
         self.kinds = kinds
         self.image_names = image_names
@@ -98,7 +106,7 @@ class DatasetRetriever(Dataset):
             sample = self.transforms(**sample)
             image = sample['image']
             
-        target = onehot(4, label)
+        target = onehot(ONEHOT_LENGTH, label)
         return image, target
 
     def __len__(self) -> int:
@@ -107,32 +115,29 @@ class DatasetRetriever(Dataset):
     def get_labels(self):
         return list(self.labels)
 
-fold_number = 0
-
 train_dataset = DatasetRetriever(
-    kinds=dataset[dataset['fold'] != fold_number].kind.values,
-    image_names=dataset[dataset['fold'] != fold_number].image_name.values,
-    labels=dataset[dataset['fold'] != fold_number].label.values,
-    transforms=get_train_transforms(),
+    kinds = dataset[dataset['fold'] != FOLD_NUMBER].kind.values,
+    image_names = dataset[dataset['fold'] != FOLD_NUMBER].image_name.values,
+    labels = dataset[dataset['fold'] != FOLD_NUMBER].label.values,
+    transforms = get_train_transforms(),
 )
 
 validation_dataset = DatasetRetriever(
-    kinds=dataset[dataset['fold'] == fold_number].kind.values,
-    image_names=dataset[dataset['fold'] == fold_number].image_name.values,
-    labels=dataset[dataset['fold'] == fold_number].label.values,
-    transforms=get_valid_transforms(),
+    kinds = dataset[dataset['fold'] == FOLD_NUMBER].kind.values,
+    image_names = dataset[dataset['fold'] == FOLD_NUMBER].image_name.values,
+    labels = dataset[dataset['fold'] == FOLD_NUMBER].label.values,
+    transforms = get_valid_transforms(),
 )
 
 image, target = train_dataset[0]
 numpy_image = image.permute(1,2,0).cpu().numpy()
 
-fig, ax = plt.subplots(1, 1, figsize=(16, 8))
+fig, ax = plt.subplots(1, 1, figsize = (16, 8))
     
 ax.set_axis_off()
-# ax.imshow(numpy_image);
+
 
 # Metrics
-from sklearn import metrics
 
 class AverageMeter(object):
     """Computes and stores the average and current value"""
@@ -156,21 +161,21 @@ def alaska_weighted_auc(y_true, y_valid):
     """
     https://www.kaggle.com/anokas/weighted-auc-metric-updated
     """
-    tpr_thresholds = [0.0, 0.4, 1.0]
-    weights = [2, 1]
+    TPR_THRESHOLDS = [0.0, 0.4, 1.0]
+    WEIGHTS = [2, 1]
 
     fpr, tpr, thresholds = metrics.roc_curve(y_true, y_valid, pos_label=1)
 
     # size of subsets
-    areas = np.array(tpr_thresholds[1:]) - np.array(tpr_thresholds[:-1])
+    areas = np.array(TPR_THRESHOLDS[1:]) - np.array(TPR_THRESHOLDS[:-1])
 
     # The total area is normalized by the sum of weights such that the final weighted AUC is between 0 and 1.
-    normalization = np.dot(areas, weights)
+    normalization = np.dot(areas, WEIGHTS)
 
-    competition_metric = 0
-    for idx, weight in enumerate(weights):
-        y_min = tpr_thresholds[idx]
-        y_max = tpr_thresholds[idx + 1]
+    COMPETITION_METRIC = 0
+    for idx, weight in enumerate(WEIGHTS):
+        y_min = TPR_THRESHOLDS[idx]
+        y_max = TPR_THRESHOLDS[idx + 1]
         mask = (y_min < tpr) & (tpr < y_max)
         # pdb.set_trace()
 
@@ -182,9 +187,9 @@ def alaska_weighted_auc(y_true, y_valid):
         score = metrics.auc(x, y)
         submetric = score * weight
         best_subscore = (y_max - y_min) * weight
-        competition_metric += submetric
+        COMPETITION_METRIC += submetric
 
-    return competition_metric / normalization
+    return COMPETITION_METRIC / normalization
         
 class RocAucMeter(object):
     def __init__(self):
@@ -222,7 +227,7 @@ class LabelSmoothing(nn.Module):
             nll_loss = -logprobs * target
             nll_loss = nll_loss.sum(-1)
     
-            smooth_loss = -logprobs.mean(dim=-1)
+            smooth_loss = -logprobs.mean(dim = -1)
 
             loss = self.confidence * nll_loss + self.smoothing * smooth_loss
 
@@ -255,7 +260,7 @@ class Fitter:
             {'params': [p for n, p in param_optimizer if any(nd in n for nd in no_decay)], 'weight_decay': 0.0}
         ] 
 
-        self.optimizer = torch.optim.AdamW(self.model.parameters(), lr=config.lr)
+        self.optimizer = torch.optim.AdamW(self.model.parameters(), lr = config.lr)
         self.scheduler = config.SchedulerClass(self.optimizer, **config.scheduler_params)
         self.criterion = LabelSmoothing().to(self.device)
         self.log(f'Fitter prepared. Device is {self.device}')
@@ -285,7 +290,7 @@ class Fitter:
                     os.remove(path)
 
             if self.config.validation_scheduler:
-                self.scheduler.step(metrics=summary_loss.avg)
+                self.scheduler.step(metrics = summary_loss.avg)
 
             self.epoch += 1
 
@@ -375,7 +380,7 @@ from efficientnet_pytorch import EfficientNet
 
 def get_net():
     net = EfficientNet.from_pretrained('efficientnet-b2')
-    net._fc = nn.Linear(in_features=1408, out_features=4, bias=True)
+    net._fc = nn.Linear(in_features = IN_FEATURE, out_features = OUT_FEATURE, bias=True)
     return net
 
 net = get_net().cuda()
@@ -384,8 +389,8 @@ net = get_net().cuda()
 class TrainGlobalConfig:
     num_workers = 4
     batch_size = 16 
-    n_epochs = 25
-    lr = 0.001
+    n_epochs = NUM_EPOCH
+    lr = LEARNING_RATE
 
     # -------------------
     verbose = True
@@ -428,28 +433,22 @@ def run_training():
 
     train_loader = torch.utils.data.DataLoader(
         train_dataset,
-        sampler=BalanceClassSampler(labels=train_dataset.get_labels(), mode="downsampling"),
-        batch_size=TrainGlobalConfig.batch_size,
-        pin_memory=False,
-        drop_last=True,
-        num_workers=TrainGlobalConfig.num_workers,
+        sampler = BalanceClassSampler(labels = train_dataset.get_labels(), mode = "downsampling"),
+        batch_size = TrainGlobalConfig.batch_size,
+        pin_memory = False,
+        drop_last = True,
+        num_workers = TrainGlobalConfig.num_workers,
     )
     val_loader = torch.utils.data.DataLoader(
         validation_dataset, 
-        batch_size=TrainGlobalConfig.batch_size,
-        num_workers=TrainGlobalConfig.num_workers,
-        shuffle=False,
-        sampler=SequentialSampler(validation_dataset),
-        pin_memory=False,
+        batch_size = TrainGlobalConfig.batch_size,
+        num_workers = TrainGlobalConfig.num_workers,
+        shuffle = False,
+        sampler = SequentialSampler(validation_dataset),
+        pin_memory = False,
     )
 
-    fitter = Fitter(model=net, device=device, config=TrainGlobalConfig)
+    fitter = Fitter(model = net, device = device, config = TrainGlobalConfig)
     fitter.fit(train_loader, val_loader)
 
 run_training()
-
-# check the log
-file = open('/home/chloe/Chloe/log.txt', 'r')
-for line in file.readlines():
-    print(line[:-1])
-file.close()
