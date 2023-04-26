@@ -24,14 +24,15 @@ os.environ['CUDA_VISIBLE_DEVICES'] = '1'
 
 SEED = 42
 N_SPLITS=5
-HEIGHT, WIDTH = 512
+HEIGHT, WIDTH = 512, 512
 FOLD_NUMBER = 0
 ONEHOT_LENGTH = 4
 IN_FEATURE = 1408
 OUT_FEATURE = 4
 NUM_EPOCH = 25
 LEARNING_RATE = 0.001
-CHECKPOINT_PATH = '/home/chloe/Chloe'
+LOG_PATH = '/home/chloe/Chloe/Alaska2/B2Inference/NumEpoch25_B2_NoResize'
+CHECKPOINT_PATH = f'{LOG_PATH}/best-checkpoint-023epoch.bin'
 DATA_ROOT_PATH = '/home/chloe/Siting/ALASKA2'
 
 def seed_everything(seed):
@@ -51,7 +52,7 @@ seed_everything(SEED)
 dataset = []
 
 for label, kind in enumerate(['Cover', 'JMiPOD', 'JUNIWARD', 'UERD']):
-    for path in glob('/home/chloe/Siting/ALASKA2/Cover/*.jpg'):
+    for path in glob(f'{DATA_ROOT_PATH}/Cover/*.jpg'):
         dataset.append({
             'kind': kind,
             'image_name': path.split('/')[-1],
@@ -133,9 +134,6 @@ image, target = train_dataset[0]
 numpy_image = image.permute(1,2,0).cpu().numpy()
 
 fig, ax = plt.subplots(1, 1, figsize = (16, 8))
-    
-ax.set_axis_off()
-
 
 # Metrics
 
@@ -246,7 +244,7 @@ class Fitter:
         self.config = config
         self.epoch = 0
 
-        self.base_dir = '/home/chloe/Chloe'
+        self.base_dir = LOG_PATH
         self.log_path = f'{self.base_dir}/log.txt'
         self.best_summary_loss = 10**5
 
@@ -452,3 +450,57 @@ def run_training():
     fitter.fit(train_loader, val_loader)
 
 run_training()
+
+# # Inference
+# checkpoint = torch.load(CHECKPOINT_PATH)
+# net.load_state_dict(checkpoint['model_state_dict']);
+# net.eval();
+# checkpoint.keys();
+
+# class DatasetSubmissionRetriever(Dataset):
+#     def __init__(self, image_names, transforms = None):
+#         super().__init__()
+#         self.image_names = image_names
+#         self.transforms = transforms
+
+#     def __getitem__(self, index: int):
+#         image_name = self.image_names[index]
+#         image = cv2.imread(f'{DATA_ROOT_PATH}/Test/{image_name}', cv2.IMREAD_COLOR)
+#         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB).astype(np.float32)
+#         image /= 255.0
+#         if self.transforms:
+#             sample = {'image': image}
+#             sample = self.transforms(**sample)
+#             image = sample['image']
+#         return image_name, image
+#     def __len__(self) -> int:
+#         return self.image_names.shape[0]
+
+# dataset = DatasetSubmissionRetriever(
+#     image_names = np.array([path.split('/')[-1] for path in glob('{DATA_ROOT_PATH}/Test/*jpg')]),
+#     transforms = get_valid_transforms(),
+# )
+
+# data_loader = DataLoader(
+#     dataset,
+#     batch_size=8,
+#     shuffle=False,
+#     num_workers=2,
+#     drop_last=False,
+# )
+
+# result = {'Id': [], 'Label': []}
+# for step, (image_names, images) in enumerate(data_loader):
+#     print(step, end='\r')
+    
+#     y_pred = net(images.cuda())
+#     y_pred = 1 - nn.functional.softmax(y_pred, dim=1).data.cpu().numpy()[:,0]
+    
+#     result['Id'].extend(image_names)
+#     result['Label'].extend(y_pred)
+
+# # Submission
+# submission = pd.DataFrame(result)
+# submission.sort_values(by='Id', inplace=True)
+# submission.reset_index(drop=True, inplace=True)
+# submission.to_csv('submission_b2.csv', index=False)
