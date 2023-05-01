@@ -33,7 +33,7 @@ HEIGHT, WIDTH = 512, 512
 ONEHOT_LENGTH = 4
 
 LOG_PATH = '/home/chloe/Chloe/Alaska2/B2Inference/NumEpoch25_B2_NoResize'
-CHECKPOINT_PATH = f'{LOG_PATH}/best-checkpoint-023epoch.bin'
+CHECKPOINT_PATH = f'{LOG_PATH}/best-checkpoint-031epoch.bin'
 DATA_ROOT_PATH = '/home/chloe/Siting/ALASKA2'
 
 def seed_everything(seed):
@@ -446,67 +446,72 @@ def run_training():
         pin_memory=False,
     )
 
-    fitter = Fitter(model=net, device=device, config=TrainGlobalConfig)
+    fitter = Fitter(model = net, device = device, config = TrainGlobalConfig)
     fitter.fit(train_loader, val_loader)
 
-run_training()
+#run_training()
 
-# # check the log
-# file = open('/home/chloe/Chloe/log.txt', 'r')
+# check the log
+# file = open(f'{LOG_PATH}/log.txt', 'r')
 # for line in file.readlines():
 #     print(line[:-1])
-# file.close()
+# file.close()        
 
-# # Inference
-# checkpoint = torch.load(CHECKPOINT_PATH)
-# net.load_state_dict(checkpoint['model_state_dict']);
-# net.eval();
-# checkpoint.keys();
+# Inference
+checkpoint = torch.load(CHECKPOINT_PATH)
+net.load_state_dict(checkpoint['model_state_dict']);
+#print(net.state_dict);
+net.eval();
+keys = checkpoint.keys()
+print(keys)
+# for key in keys:
+#     print(key)
 
-# class DatasetSubmissionRetriever(Dataset):
-#     def __init__(self, image_names, transforms = None):
-#         super().__init__()
-#         self.image_names = image_names
-#         self.transforms = transforms
+class DatasetSubmissionRetriever(Dataset):
+    def __init__(self, image_names, transforms = None):
+        super().__init__()
+        self.image_names = image_names
+        self.transforms = transforms
 
-#     def __getitem__(self, index: int):
-#         image_name = self.image_names[index]
-#         image = cv2.imread(f'{DATA_ROOT_PATH}/Test/{image_name}', cv2.IMREAD_COLOR)
-#         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB).astype(np.float32)
-#         image /= 255.0
-#         if self.transforms:
-#             sample = {'image': image}
-#             sample = self.transforms(**sample)
-#             image = sample['image']
-#         return image_name, image
-#     def __len__(self) -> int:
-#         return self.image_names.shape[0]
+    def __getitem__(self, index: int):
+        image_name = self.image_names[index]
+        image = cv2.imread(f'{DATA_ROOT_PATH}/Test/{image_name}', cv2.IMREAD_COLOR)
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB).astype(np.float32)
+        image /= 255.0
+        if self.transforms:
+            sample = {'image': image}
+            sample = self.transforms(**sample)
+            image = sample['image']
+        return image_name, image
+    def __len__(self) -> int:
+        return self.image_names.shape[0]
 
-# dataset = DatasetSubmissionRetriever(
-#     image_names = np.array([path.split('/')[-1] for path in glob('{DATA_ROOT_PATH}/Test/*jpg')]),
-#     transforms = get_valid_transforms(),
-# )
+test_dataset = DatasetSubmissionRetriever(
+    image_names = np.array([path.split('/')[-1] for path in glob(f'{DATA_ROOT_PATH}/Test/*jpg')]),
+    transforms = get_valid_transforms(),
+)
 
-# data_loader = DataLoader(
-#     dataset,
-#     batch_size=8,
-#     shuffle=False,
-#     num_workers=2,
-#     drop_last=False,
-# )
+data_loader = DataLoader(
+    test_dataset,
+    batch_size = 8,
+    shuffle = False,
+    num_workers = 2,
+    drop_last = False,
+)
 
-# result = {'Id': [], 'Label': []}
-# for step, (image_names, images) in enumerate(data_loader):
-#     print(step, end='\r')
+result = {'Id': [], 'Label': []}
+for step, (image_names, images) in enumerate(data_loader):
+    print(step, end = '\r')
     
-#     y_pred = net(images.cuda())
-#     y_pred = 1 - nn.functional.softmax(y_pred, dim=1).data.cpu().numpy()[:,0]
+    y_pred = net(images.cuda())
+    y_pred = 1 - nn.functional.softmax(y_pred, dim = 1).data.cpu().numpy()[:,0]
     
-#     result['Id'].extend(image_names)
-#     result['Label'].extend(y_pred)
-
-# # Submission
-# submission = pd.DataFrame(result)
-# submission.sort_values(by='Id', inplace=True)
-# submission.reset_index(drop=True, inplace=True)
-# submission.to_csv('submission_b2.csv', index=False)
+    result['Id'].extend(image_names)
+    result['Label'].extend(y_pred)
+    
+# Submission
+submission = pd.DataFrame(result)
+submission.sort_values(by = 'Id', inplace = True)
+submission.reset_index(drop = True, inplace = True)
+submission.to_csv('submission_b2_epoch031.csv', index = False)
+submission.head(5)
