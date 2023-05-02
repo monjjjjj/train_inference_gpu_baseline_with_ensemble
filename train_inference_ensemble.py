@@ -1,11 +1,15 @@
 from glob import glob
 from sklearn.model_selection import GroupKFold
-import cv2
 from skimage import io
-import torch
 from torch import nn
-import os
 from datetime import datetime
+from albumentations.pytorch.transforms import ToTensorV2
+from torch.utils.data import Dataset,DataLoader
+from torch.utils.data.sampler import SequentialSampler, RandomSampler
+from efficientnet_pytorch import EfficientNet
+import cv2
+import torch
+import os
 import time
 import random
 import cv2
@@ -13,11 +17,8 @@ import pandas as pd
 import numpy as np
 import albumentations as A
 import matplotlib.pyplot as plt
-from albumentations.pytorch.transforms import ToTensorV2
-from torch.utils.data import Dataset,DataLoader
-from torch.utils.data.sampler import SequentialSampler, RandomSampler
-from efficientnet_pytorch import EfficientNet
 import sklearn
+import timm
 
 os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
 os.environ['CUDA_VISIBLE_DEVICES'] = '1'
@@ -26,13 +27,13 @@ SEED = 42
 NUM_SPLITS = 5
 FOLD_NUM = 0
 NUM_WORKER = 4
-BATCH_SIZE = 32
+BATCH_SIZE = 16
 NUM_EPOCH = 35
 LEARNING_RATE = 0.001
 HEIGHT, WIDTH = 512, 512
 ONEHOT_LENGTH = 4
 
-LOG_PATH = '/home/chloe/Chloe/Alaska2/B2Inference/NumEpoch25_B2_NoResize'
+LOG_PATH = '/home/chloe/Chloe/Alaska2/ConvnextBase'
 CHECKPOINT_PATH = f'{LOG_PATH}/best-checkpoint-031epoch.bin'
 DATA_ROOT_PATH = '/home/chloe/Siting/ALASKA2'
 
@@ -222,9 +223,11 @@ class LabelSmoothing(nn.Module):
     def forward(self, x, target):
         if self.training:
             x = x.float()
+            #print("x.shape: ", x.shape)
             target = target.float()
             logprobs = torch.nn.functional.log_softmax(x, dim = -1)
-
+            #print("logprobs.shape: ", logprobs.shape)
+            #print("target.shape: ", target.shape)
             nll_loss = -logprobs * target
             nll_loss = nll_loss.sum(-1)
     
@@ -376,12 +379,14 @@ class Fitter:
         with open(self.log_path, 'a+') as logger:
             logger.write(f'{message}\n')
 
-# EfficientNet
+# ConvNext
 def get_net():
-    net = EfficientNet.from_pretrained('efficientnet-b2')
-    net._fc = nn.Linear(in_features=1408, out_features=4, bias=True)
+    net = timm.create_model("convnext_base", pretrained = True, num_classes = NUM_WORKER)
+    # net = EfficientNet.from_pretrained('efficientnet-b2')
+    # net._fc = nn.Linear(in_features = 1408, out_features = 4, bias = True)
     return net
 net = get_net().cuda()
+#print(net)
 
 # Config
 class TrainGlobalConfig:
@@ -411,15 +416,15 @@ class TrainGlobalConfig:
     
     SchedulerClass = torch.optim.lr_scheduler.ReduceLROnPlateau
     scheduler_params = dict(
-        mode='min',
-        factor=0.5,
-        patience=1,
-        verbose=False, 
-        threshold=0.0001,
-        threshold_mode='abs',
-        cooldown=0, 
-        min_lr=1e-8,
-        eps=1e-08
+        mode = 'min',
+        factor = 0.5,
+        patience = 1,
+        verbose = False, 
+        threshold = 0.0001,
+        threshold_mode = 'abs',
+        cooldown = 0, 
+        min_lr = 1e-8,
+        eps = 1e-08
     )
     # --------------------
 
@@ -431,25 +436,25 @@ def run_training():
 
     train_loader = torch.utils.data.DataLoader(
         train_dataset,
-        sampler=BalanceClassSampler(labels=train_dataset.get_labels(), mode="downsampling"),
-        batch_size=TrainGlobalConfig.batch_size,
-        pin_memory=False,
-        drop_last=True,
-        num_workers=TrainGlobalConfig.num_workers,
+        sampler = BalanceClassSampler(labels=train_dataset.get_labels(), mode = "downsampling"),
+        batch_size = TrainGlobalConfig.batch_size,
+        pin_memory = False,
+        drop_last = True,
+        num_workers = TrainGlobalConfig.num_workers,
     )
     val_loader = torch.utils.data.DataLoader(
         validation_dataset, 
-        batch_size=TrainGlobalConfig.batch_size,
-        num_workers=TrainGlobalConfig.num_workers,
-        shuffle=False,
-        sampler=SequentialSampler(validation_dataset),
-        pin_memory=False,
+        batch_size = TrainGlobalConfig.batch_size,
+        num_workers = TrainGlobalConfig.num_workers,
+        shuffle = False,
+        sampler = SequentialSampler(validation_dataset),
+        pin_memory = False,
     )
 
     fitter = Fitter(model = net, device = device, config = TrainGlobalConfig)
     fitter.fit(train_loader, val_loader)
 
-#run_training()
+run_training()
 
 # check the log
 # file = open(f'{LOG_PATH}/log.txt', 'r')
@@ -457,61 +462,59 @@ def run_training():
 #     print(line[:-1])
 # file.close()        
 
-# Inference
-checkpoint = torch.load(CHECKPOINT_PATH)
-net.load_state_dict(checkpoint['model_state_dict']);
-#print(net.state_dict);
-net.eval();
-keys = checkpoint.keys()
-print(keys)
-# for key in keys:
-#     print(key)
+# # Inference
+# checkpoint = torch.load(CHECKPOINT_PATH)
+# net.load_state_dict(checkpoint['model_state_dict']);
+# #print(net.state_dict);
+# net.eval();
+# keys = checkpoint.keys()
+# print(keys)
 
-class DatasetSubmissionRetriever(Dataset):
-    def __init__(self, image_names, transforms = None):
-        super().__init__()
-        self.image_names = image_names
-        self.transforms = transforms
+# class DatasetSubmissionRetriever(Dataset):
+#     def __init__(self, image_names, transforms = None):
+#         super().__init__()
+#         self.image_names = image_names
+#         self.transforms = transforms
 
-    def __getitem__(self, index: int):
-        image_name = self.image_names[index]
-        image = cv2.imread(f'{DATA_ROOT_PATH}/Test/{image_name}', cv2.IMREAD_COLOR)
-        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB).astype(np.float32)
-        image /= 255.0
-        if self.transforms:
-            sample = {'image': image}
-            sample = self.transforms(**sample)
-            image = sample['image']
-        return image_name, image
-    def __len__(self) -> int:
-        return self.image_names.shape[0]
+#     def __getitem__(self, index: int):
+#         image_name = self.image_names[index]
+#         image = cv2.imread(f'{DATA_ROOT_PATH}/Test/{image_name}', cv2.IMREAD_COLOR)
+#         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB).astype(np.float32)
+#         image /= 255.0
+#         if self.transforms:
+#             sample = {'image': image}
+#             sample = self.transforms(**sample)
+#             image = sample['image']
+#         return image_name, image
+#     def __len__(self) -> int:
+#         return self.image_names.shape[0]
 
-test_dataset = DatasetSubmissionRetriever(
-    image_names = np.array([path.split('/')[-1] for path in glob(f'{DATA_ROOT_PATH}/Test/*jpg')]),
-    transforms = get_valid_transforms(),
-)
+# test_dataset = DatasetSubmissionRetriever(
+#     image_names = np.array([path.split('/')[-1] for path in glob(f'{DATA_ROOT_PATH}/Test/*jpg')]),
+#     transforms = get_valid_transforms(),
+# )
 
-data_loader = DataLoader(
-    test_dataset,
-    batch_size = 8,
-    shuffle = False,
-    num_workers = 2,
-    drop_last = False,
-)
+# data_loader = DataLoader(
+#     test_dataset,
+#     batch_size = 8,
+#     shuffle = False,
+#     num_workers = 2,
+#     drop_last = False,
+# )
 
-result = {'Id': [], 'Label': []}
-for step, (image_names, images) in enumerate(data_loader):
-    print(step, end = '\r')
+# result = {'Id': [], 'Label': []}
+# for step, (image_names, images) in enumerate(data_loader):
+#     print(step, end = '\r')
     
-    y_pred = net(images.cuda())
-    y_pred = 1 - nn.functional.softmax(y_pred, dim = 1).data.cpu().numpy()[:,0]
+#     y_pred = net(images.cuda())
+#     y_pred = 1 - nn.functional.softmax(y_pred, dim = 1).data.cpu().numpy()[:,0]
     
-    result['Id'].extend(image_names)
-    result['Label'].extend(y_pred)
+#     result['Id'].extend(image_names)
+#     result['Label'].extend(y_pred)
     
-# Submission
-submission = pd.DataFrame(result)
-submission.sort_values(by = 'Id', inplace = True)
-submission.reset_index(drop = True, inplace = True)
-submission.to_csv('submission_b2_epoch031.csv', index = False)
-submission.head(5)
+# # Submission
+# submission = pd.DataFrame(result)
+# submission.sort_values(by = 'Id', inplace = True)
+# submission.reset_index(drop = True, inplace = True)
+# submission.to_csv('submission_b2_epoch031.csv', index = False)
+# print(submission.head())
