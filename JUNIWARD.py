@@ -27,15 +27,16 @@ SEED = 42
 NUM_SPLITS = 5
 FOLD_NUM = 0
 NUM_WORKER = 4
-BATCH_SIZE = 16
+BATCH_SIZE = 32
 NUM_EPOCH = 35
 LEARNING_RATE = 0.001
 HEIGHT, WIDTH = 512, 512
-ONEHOT_LENGTH = 4
+ONEHOT_LENGTH = 2
 
-LOG_PATH = '/home/chloe/Chloe/Alaska2/ConvnextBase'
+LOG_PATH = '/home/chloe/Chloe/Alaska2/JUNIWARD'
 CHECKPOINT_PATH = f'{LOG_PATH}/best-checkpoint-031epoch.bin'
-DATA_ROOT_PATH = '/home/chloe/Siting/ALASKA2'
+TRAIN_DATA_ROOT_PATH ='/home/chloe/Chloe/ALASKA2_data_sp91/train'
+VAL_DATA_ROOT_PATH = '/home/chloe/Chloe/ALASKA2_data_sp91/val'
 
 def seed_everything(seed):
     random.seed(seed)
@@ -53,8 +54,8 @@ seed_everything(SEED)
 
 dataset = []
 
-for label, kind in enumerate(['Cover', 'JMiPOD', 'JUNIWARD', 'UERD']):
-    for path in glob(f'{DATA_ROOT_PATH}/{kind}/*.jpg'):
+for label, kind in enumerate(['Cover', 'JUNIWARD']):
+    for path in glob(f'{TRAIN_DATA_ROOT_PATH}/{kind}/*.jpg'):
         dataset.append({
             'kind': kind,
             'image_name': path.split('/')[-1],
@@ -63,6 +64,7 @@ for label, kind in enumerate(['Cover', 'JMiPOD', 'JUNIWARD', 'UERD']):
 
 random.shuffle(dataset)
 dataset = pd.DataFrame(dataset)
+dataset.to_csv('AfterShuffle.csv', index = False)
 
 gkf = GroupKFold(n_splits = NUM_SPLITS)
 
@@ -102,7 +104,7 @@ class DatasetRetriever(Dataset):
 
     def __getitem__(self, index: int):
         kind, image_name, label = self.kinds[index], self.image_names[index], self.labels[index]
-        image = cv2.imread(f'{DATA_ROOT_PATH}/{kind}/{image_name}', cv2.IMREAD_COLOR)
+        image = cv2.imread(f'{TRAIN_DATA_ROOT_PATH}/{kind}/{image_name}', cv2.IMREAD_COLOR)
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB).astype(np.float32)
         image /= 255.0
         if self.transforms:
@@ -152,7 +154,7 @@ class AverageMeter(object):
         self.sum = 0
         self.count = 0
 
-    def update(self, val, n=1):
+    def update(self, val, n = 1):
         self.val = val
         self.sum += val * n
         self.count += n
@@ -188,7 +190,7 @@ def alaska_weighted_auc(y_true, y_valid):
         x_padding = np.linspace(fpr[mask][-1], 1, 100)
         x = np.concatenate([fpr[mask], x_padding])
         y = np.concatenate([tpr[mask], [y_max] * len(x_padding)])
-        y = y - y_min  # normalize such that curve starts at y=0
+        y = y - y_min  # normalize such that curve starts at y = 0
         score = metrics.auc(x, y)
         submetric = score * weight
         best_subscore = (y_max - y_min) * weight
@@ -201,13 +203,13 @@ class RocAucMeter(object):
         self.reset()
 
     def reset(self):
-        self.y_true = np.array([0,1])
-        self.y_pred = np.array([0.5,0.5])
+        self.y_true = np.array([0, 1])
+        self.y_pred = np.array([0.5, 0.5])
         self.score = 0
 
     def update(self, y_true, y_pred):
         y_true = y_true.cpu().numpy().argmax(axis = 1).clip(min = 0, max = 1).astype(int)
-        y_pred = 1 - nn.functional.softmax(y_pred, dim=1).data.cpu().numpy()[:, 0]
+        y_pred = 1 - nn.functional.softmax(y_pred, dim = 1).data.cpu().numpy()[:, 0]
         self.y_true = np.hstack((self.y_true, y_true))
         self.y_pred = np.hstack((self.y_pred, y_pred))
         self.score = alaska_weighted_auc(self.y_true, self.y_pred)
@@ -233,11 +235,8 @@ class LabelSmoothing(nn.Module):
             #print("target.shape: ", target.shape)
             nll_loss = -logprobs * target
             nll_loss = nll_loss.sum(-1)
-    
             smooth_loss = -logprobs.mean(dim = -1)
-
             loss = self.confidence * nll_loss + self.smoothing * smooth_loss
-
             return loss.mean()
         else:
             return torch.nn.functional.cross_entropy(x, target)
@@ -254,7 +253,7 @@ class Fitter:
         self.epoch = 0
 
         self.base_dir = LOG_PATH
-        self.log_path = f'{self.base_dir}/log.txt'
+        self.log_path = f'{self.base_dir}/log1.txt'
         self.best_summary_loss = 10**5
 
         self.model = model
@@ -382,11 +381,10 @@ class Fitter:
         with open(self.log_path, 'a+') as logger:
             logger.write(f'{message}\n')
 
-# ConvNext
 def get_net():
-    # net = timm.create_model("convnext_base", pretrained = True, num_classes = NUM_WORKER)
+    # net = timm.create_model("convnext_base", pretrained = True, num_classes = 2)
     net = EfficientNet.from_pretrained('efficientnet-b2')
-    net._fc = nn.Linear(in_features = 1408, out_features = 4, bias = True)
+    net._fc = nn.Linear(in_features = 1408, out_features = 2, bias = True)
     return net
 net = get_net().cuda()
 #print(net)
@@ -439,7 +437,7 @@ def run_training():
 
     train_loader = torch.utils.data.DataLoader(
         train_dataset,
-        sampler = BalanceClassSampler(labels=train_dataset.get_labels(), mode = "downsampling"),
+        sampler = BalanceClassSampler(labels = train_dataset.get_labels(), mode = "downsampling"),
         batch_size = TrainGlobalConfig.batch_size,
         pin_memory = False,
         drop_last = True,
@@ -481,7 +479,7 @@ run_training()
 
 #     def __getitem__(self, index: int):
 #         image_name = self.image_names[index]
-#         image = cv2.imread(f'{DATA_ROOT_PATH}/Test/{image_name}', cv2.IMREAD_COLOR)
+#         image = cv2.imread(f'{VAL_DATA_ROOT_PATH}/Test/{image_name}', cv2.IMREAD_COLOR)
 #         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB).astype(np.float32)
 #         image /= 255.0
 #         if self.transforms:
@@ -493,7 +491,7 @@ run_training()
 #         return self.image_names.shape[0]
 
 # test_dataset = DatasetSubmissionRetriever(
-#     image_names = np.array([path.split('/')[-1] for path in glob(f'{DATA_ROOT_PATH}/Test/*jpg')]),
+#     image_names = np.array([path.split('/')[-1] for path in glob(f'{VAL_DATA_ROOT_PATH}/Test/*jpg')]),
 #     transforms = get_valid_transforms(),
 # )
 
