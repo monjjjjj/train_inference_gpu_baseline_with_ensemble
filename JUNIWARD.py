@@ -31,12 +31,13 @@ BATCH_SIZE = 32
 NUM_EPOCH = 35
 LEARNING_RATE = 0.001
 HEIGHT, WIDTH = 512, 512
-ONEHOT_LENGTH = 2
-
+ONEHOT_LENGTH = 3
+OUT_FEATURE = 3
 LOG_PATH = '/home/chloe/Chloe/Alaska2/JUNIWARD'
 CHECKPOINT_PATH = f'{LOG_PATH}/best-checkpoint-031epoch.bin'
-TRAIN_DATA_ROOT_PATH ='/home/chloe/Chloe/ALASKA2_data_sp91/train'
+TRAIN_DATA_ROOT_PATH = '/home/chloe/Chloe/ALASKA2_data_sp91/train'
 VAL_DATA_ROOT_PATH = '/home/chloe/Chloe/ALASKA2_data_sp91/val'
+
 
 def seed_everything(seed):
     random.seed(seed)
@@ -64,7 +65,6 @@ for label, kind in enumerate(['Cover', 'JUNIWARD']):
 
 random.shuffle(dataset)
 dataset = pd.DataFrame(dataset)
-dataset.to_csv('AfterShuffle.csv', index = False)
 
 gkf = GroupKFold(n_splits = NUM_SPLITS)
 
@@ -142,6 +142,7 @@ numpy_image = image.permute(1,2,0).cpu().numpy()
 
 # Metrics
 from sklearn import metrics
+from sklearn.metrics import roc_auc_score
 
 class AverageMeter(object):
     """Computes and stores the average and current value"""
@@ -160,7 +161,6 @@ class AverageMeter(object):
         self.count += n
         self.avg = self.sum / self.count
         
-        
 def alaska_weighted_auc(y_true, y_valid):
     """
     https://www.kaggle.com/anokas/weighted-auc-metric-updated
@@ -169,6 +169,7 @@ def alaska_weighted_auc(y_true, y_valid):
     weights = [2, 1]
 
     fpr, tpr, thresholds = metrics.roc_curve(y_true, y_valid, pos_label = 1)
+
     # print("size of fpr and tpr: %d, %d" %(fpr.size, tpr.size))
     # size of subsets
     areas = np.array(tpr_thresholds[1:]) - np.array(tpr_thresholds[:-1])
@@ -212,7 +213,7 @@ class RocAucMeter(object):
         y_pred = 1 - nn.functional.softmax(y_pred, dim = 1).data.cpu().numpy()[:, 0]
         self.y_true = np.hstack((self.y_true, y_true))
         self.y_pred = np.hstack((self.y_pred, y_pred))
-        self.score = alaska_weighted_auc(self.y_true, self.y_pred)
+        self.score = roc_auc_score(self.y_true, self.y_pred)
     
     @property
     def avg(self):
@@ -235,8 +236,11 @@ class LabelSmoothing(nn.Module):
             #print("target.shape: ", target.shape)
             nll_loss = -logprobs * target
             nll_loss = nll_loss.sum(-1)
+    
             smooth_loss = -logprobs.mean(dim = -1)
+
             loss = self.confidence * nll_loss + self.smoothing * smooth_loss
+
             return loss.mean()
         else:
             return torch.nn.functional.cross_entropy(x, target)
@@ -253,7 +257,7 @@ class Fitter:
         self.epoch = 0
 
         self.base_dir = LOG_PATH
-        self.log_path = f'{self.base_dir}/log1.txt'
+        self.log_path = f'{self.base_dir}/log.txt'
         self.best_summary_loss = 10**5
 
         self.model = model
@@ -381,10 +385,11 @@ class Fitter:
         with open(self.log_path, 'a+') as logger:
             logger.write(f'{message}\n')
 
+# ConvNext
 def get_net():
-    # net = timm.create_model("convnext_base", pretrained = True, num_classes = 2)
+    # net = timm.create_model("convnext_base", pretrained = True, num_classes = )
     net = EfficientNet.from_pretrained('efficientnet-b2')
-    net._fc = nn.Linear(in_features = 1408, out_features = 2, bias = True)
+    net._fc = nn.Linear(in_features = 1408, out_features = OUT_FEATURE, bias = True)
     return net
 net = get_net().cuda()
 #print(net)
