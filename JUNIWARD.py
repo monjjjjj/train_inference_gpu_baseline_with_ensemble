@@ -243,7 +243,7 @@ class LabelSmoothing(nn.Module):
 
             return loss.mean()
         else:
-            return torch.nn.functional.cross_entropy(x, target)
+            return torch.nn.functional.binary_cross_entropy(x, target)
 
 # Fitter
 import warnings
