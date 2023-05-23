@@ -27,7 +27,7 @@ SEED = 42
 NUM_SPLITS = 5
 FOLD_NUM = 0
 NUM_WORKER = 4
-BATCH_SIZE = 16
+BATCH_SIZE = 32
 NUM_EPOCH = 35
 LEARNING_RATE = 0.001
 HEIGHT, WIDTH = 512, 512
@@ -167,7 +167,7 @@ def alaska_weighted_auc(y_true, y_valid):
     weights = [2, 1]
 
     fpr, tpr, thresholds = metrics.roc_curve(y_true, y_valid, pos_label = 1)
-    # print("size of fpr and tpr: %d, %d" %(fpr.size, tpr.size))
+
     # size of subsets
     areas = np.array(tpr_thresholds[1:]) - np.array(tpr_thresholds[:-1])
 
