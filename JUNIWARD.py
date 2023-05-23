@@ -7,6 +7,9 @@ from albumentations.pytorch.transforms import ToTensorV2
 from torch.utils.data import Dataset,DataLoader
 from torch.utils.data.sampler import SequentialSampler, RandomSampler
 from efficientnet_pytorch import EfficientNet
+from sklearn import metrics
+from sklearn.metrics import roc_auc_score
+from torchmetrics.classification import AUROC
 import cv2
 import torch
 import os
@@ -31,8 +34,8 @@ BATCH_SIZE = 32
 NUM_EPOCH = 35
 LEARNING_RATE = 0.001
 HEIGHT, WIDTH = 512, 512
-ONEHOT_LENGTH = 3
-OUT_FEATURE = 3
+ONEHOT_LENGTH = 2
+OUT_FEATURE = 2
 LOG_PATH = '/home/chloe/Chloe/Alaska2/JUNIWARD'
 CHECKPOINT_PATH = f'{LOG_PATH}/best-checkpoint-031epoch.bin'
 TRAIN_DATA_ROOT_PATH = '/home/chloe/Chloe/ALASKA2_data_sp91/train'
@@ -77,13 +80,11 @@ def get_train_transforms():
     return A.Compose([
             A.HorizontalFlip(p = 0.5),
             A.VerticalFlip(p = 0.5),
-            # A.Resize(height = HEIGHT, width = WIDTH, p = 1.0),
             ToTensorV2(p = 1.0),
         ], p = 1.0)
 
 def get_valid_transforms():
     return A.Compose([
-            # A.Resize(height = HEIGHT, width = WIDTH, p = 1.0),
             ToTensorV2(p = 1.0),
         ], p = 1.0)
 
@@ -94,7 +95,6 @@ def onehot(size, target):
     return vec
 
 class DatasetRetriever(Dataset):
-
     def __init__(self, kinds, image_names, labels, transforms = None):
         super().__init__()
         self.kinds = kinds
@@ -141,9 +141,6 @@ image, target = train_dataset[0]
 numpy_image = image.permute(1,2,0).cpu().numpy()
 
 # Metrics
-from sklearn import metrics
-from sklearn.metrics import roc_auc_score
-
 class AverageMeter(object):
     """Computes and stores the average and current value"""
     def __init__(self):
@@ -170,7 +167,6 @@ def alaska_weighted_auc(y_true, y_valid):
 
     fpr, tpr, thresholds = metrics.roc_curve(y_true, y_valid, pos_label = 1)
 
-    # print("size of fpr and tpr: %d, %d" %(fpr.size, tpr.size))
     # size of subsets
     areas = np.array(tpr_thresholds[1:]) - np.array(tpr_thresholds[:-1])
 
@@ -182,12 +178,8 @@ def alaska_weighted_auc(y_true, y_valid):
         y_min = tpr_thresholds[idx]
         y_max = tpr_thresholds[idx + 1]
         mask = (y_min < tpr) & (tpr < y_max)
-        # print("size of fpr: \n", fpr.size)
-        # print("size of mask: \n", mask.size)
         # pdb.set_trace()
         
-        # print("size of fpr[mask]: \n", (fpr[mask]).size)
-        # print("fpr[mask][-1]: \n", fpr[mask][-1])
         x_padding = np.linspace(fpr[mask][-1], 1, 100)
         x = np.concatenate([fpr[mask], x_padding])
         y = np.concatenate([tpr[mask], [y_max] * len(x_padding)])
@@ -198,7 +190,9 @@ def alaska_weighted_auc(y_true, y_valid):
         competition_metric += submetric
 
     return competition_metric / normalization
-        
+
+metric = AUROC(task = "binary")
+
 class RocAucMeter(object):
     def __init__(self):
         self.reset()
@@ -213,8 +207,10 @@ class RocAucMeter(object):
         y_pred = 1 - nn.functional.softmax(y_pred, dim = 1).data.cpu().numpy()[:, 0]
         self.y_true = np.hstack((self.y_true, y_true))
         self.y_pred = np.hstack((self.y_pred, y_pred))
-        self.score = roc_auc_score(self.y_true, self.y_pred)
-    
+        self.y_true = torch.tensor(self.y_true)
+        self.y_pred = torch.tensor(self.y_pred)
+        self.score = metric(self.y_pred, self.y_true)
+
     @property
     def avg(self):
         return self.score
@@ -229,18 +225,17 @@ class LabelSmoothing(nn.Module):
     def forward(self, x, target):
         if self.training:
             x = x.float()
-            #print("x.shape: ", x.shape)
+            # print("x.shape: ", x.shape)
             target = target.float()
             logprobs = torch.nn.functional.log_softmax(x, dim = -1)
-            #print("logprobs.shape: ", logprobs.shape)
-            #print("target.shape: ", target.shape)
             nll_loss = -logprobs * target
             nll_loss = nll_loss.sum(-1)
     
             smooth_loss = -logprobs.mean(dim = -1)
 
             loss = self.confidence * nll_loss + self.smoothing * smooth_loss
-
+            # criterion = nn.BCELoss()
+            # loss = criterion(x, target)
             return loss.mean()
         else:
             return torch.nn.functional.binary_cross_entropy(x, target)
