@@ -35,7 +35,7 @@ ONEHOT_LENGTH = 4
 
 LOG_PATH = '/home/chloe/Chloe/Alaska2/ConvnextBase'
 CHECKPOINT_PATH = f'{LOG_PATH}/best-checkpoint-031epoch.bin'
-DATA_ROOT_PATH = '/home/chloe/Siting/ALASKA2'
+DATA_ROOT_PATH = '/home/chloe/Siting/kaggle_3rd/scripts/rgb_naive/ALASKA2'
 
 def seed_everything(seed):
     random.seed(seed)
